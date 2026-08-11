@@ -3,70 +3,28 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '../../lib/supabase-browser';
 
-type Client = { id: string; name: string; email: string | null; company: string | null };
-type Project = { id: string; name: string; status: string; due_date: string | null; client_id: string | null; clients?: { name: string }[] | null };
+type Client = { id: string; name: string; email: string | null; company: string | null; notes?: string | null };
+type Project = { id: string; name: string; status: string; start_date: string | null; end_date: string | null; client_id: string | null; clients?: { name: string }[] | null };
+const emptyClient = { name: '', email: '', company: '' };
+const emptyProject = { name: '', client_id: '', status: 'active', start_date: '', end_date: '' };
 
 export default function Dashboard() {
-  const router = useRouter();
-  const supabase = createClient();
-  const [email, setEmail] = useState('');
-  const [clients, setClients] = useState<Client[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
-  const [clientForm, setClientForm] = useState({ name: '', email: '', company: '' });
-  const [projectForm, setProjectForm] = useState({ name: '', client_id: '', status: 'active', due_date: '' });
-  const [savingClient, setSavingClient] = useState(false);
-  const [savingProject, setSavingProject] = useState(false);
+  const router = useRouter(); const supabase = createClient();
+  const [email, setEmail] = useState(''); const [clients, setClients] = useState<Client[]>([]); const [projects, setProjects] = useState<Project[]>([]); const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const [notice, setNotice] = useState('');
+  const [clientForm, setClientForm] = useState(emptyClient); const [projectForm, setProjectForm] = useState(emptyProject); const [editingClientId, setEditingClientId] = useState<string | null>(null); const [editingProjectId, setEditingProjectId] = useState<string | null>(null); const [saving, setSaving] = useState(false);
 
-  async function loadWorkspace() {
-    setLoading(true); setError('');
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
-    if (userError || !user) { router.push('/auth'); return; }
-    setEmail(user.email || '');
-    const [clientsResult, projectsResult] = await Promise.all([
-      supabase.from('clients').select('id,name,email,company').order('created_at', { ascending: false }),
-      supabase.from('projects').select('id,name,status,due_date,client_id,clients(name)').order('created_at', { ascending: false })
-    ]);
-    if (clientsResult.error || projectsResult.error) setError(clientsResult.error?.message || projectsResult.error?.message || 'Could not load your workspace.');
-    setClients((clientsResult.data || []) as Client[]);
-    setProjects((projectsResult.data || []) as unknown as Project[]);
-    setLoading(false);
-  }
-
+  async function loadWorkspace() { setLoading(true); setError(''); const { data: { user }, error: userError } = await supabase.auth.getUser(); if (userError || !user) { router.push('/auth'); return; } setEmail(user.email || ''); const [cr, pr] = await Promise.all([supabase.from('clients').select('id,name,email,company,notes').order('created_at', { ascending: false }), supabase.from('projects').select('id,name,status,start_date,end_date,client_id,clients(name)').order('created_at', { ascending: false })]); if (cr.error || pr.error) setError(cr.error?.message || pr.error?.message || 'Could not load your workspace.'); setClients((cr.data || []) as Client[]); setProjects((pr.data || []) as unknown as Project[]); setLoading(false); }
   useEffect(() => { loadWorkspace(); }, []);
-
-  const activeProjects = useMemo(() => projects.filter(project => project.status === 'active').length, [projects]);
-  const completedProjects = useMemo(() => projects.filter(project => project.status === 'completed').length, [projects]);
-
-  async function addClient(event: FormEvent) {
-    event.preventDefault(); setSavingClient(true); setError(''); setNotice('');
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return router.push('/auth');
-    const { error } = await supabase.from('clients').insert({ owner_id: user.id, name: clientForm.name, email: clientForm.email || null, company: clientForm.company || null });
-    setSavingClient(false);
-    if (error) return setError(error.message);
-    setClientForm({ name: '', email: '', company: '' }); setNotice('Client added successfully.'); await loadWorkspace();
-  }
-
-  async function addProject(event: FormEvent) {
-    event.preventDefault(); setSavingProject(true); setError(''); setNotice('');
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return router.push('/auth');
-    const { error } = await supabase.from('projects').insert({ owner_id: user.id, name: projectForm.name, client_id: projectForm.client_id || null, status: projectForm.status, due_date: projectForm.due_date || null });
-    setSavingProject(false);
-    if (error) return setError(error.message);
-    setProjectForm({ name: '', client_id: '', status: 'active', due_date: '' }); setNotice('Project added successfully.'); await loadWorkspace();
-  }
-
+  const activeProjects = useMemo(() => projects.filter(p => p.status === 'active').length, [projects]); const completedProjects = useMemo(() => projects.filter(p => p.status === 'completed').length, [projects]);
+  function flash(message: string) { setNotice(message); setTimeout(() => setNotice(''), 3000); }
+  function editClient(client: Client) { setEditingClientId(client.id); setClientForm({ name: client.name, email: client.email || '', company: client.company || '' }); setEditingProjectId(null); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+  function editProject(project: Project) { setEditingProjectId(project.id); setProjectForm({ name: project.name, client_id: project.client_id || '', status: project.status, start_date: project.start_date || '', end_date: project.end_date || '' }); setEditingClientId(null); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+  function cancelEdit() { setEditingClientId(null); setEditingProjectId(null); setClientForm(emptyClient); setProjectForm(emptyProject); }
+  async function saveClient(e: FormEvent) { e.preventDefault(); setSaving(true); setError(''); const payload = { name: clientForm.name, email: clientForm.email || null, company: clientForm.company || null }; const result = editingClientId ? await supabase.from('clients').update(payload).eq('id', editingClientId) : await supabase.auth.getUser().then(async ({ data }) => supabase.from('clients').insert({ ...payload, owner_id: data.user?.id })); setSaving(false); if (result.error) return setError(result.error.message); cancelEdit(); flash(editingClientId ? 'Client updated.' : 'Client added.'); await loadWorkspace(); }
+  async function saveProject(e: FormEvent) { e.preventDefault(); setSaving(true); setError(''); const payload = { name: projectForm.name, client_id: projectForm.client_id || null, status: projectForm.status, start_date: projectForm.start_date || null, end_date: projectForm.end_date || null }; const result = editingProjectId ? await supabase.from('projects').update(payload).eq('id', editingProjectId) : await supabase.auth.getUser().then(async ({ data }) => supabase.from('projects').insert({ ...payload, owner_id: data.user?.id })); setSaving(false); if (result.error) return setError(result.error.message); cancelEdit(); flash(editingProjectId ? 'Project updated.' : 'Project added.'); await loadWorkspace(); }
+  async function removeClient() { if (!editingClientId || !window.confirm('Delete this client?')) return; setSaving(true); const { error } = await supabase.from('clients').delete().eq('id', editingClientId); setSaving(false); if (error) return setError(error.message); cancelEdit(); flash('Client deleted.'); await loadWorkspace(); }
+  async function removeProject() { if (!editingProjectId || !window.confirm('Delete this project?')) return; setSaving(true); const { error } = await supabase.from('projects').delete().eq('id', editingProjectId); setSaving(false); if (error) return setError(error.message); cancelEdit(); flash('Project deleted.'); await loadWorkspace(); }
   async function logout() { await supabase.auth.signOut(); router.push('/auth'); }
-
   if (loading) return <main><section className="card"><p>Loading your workspace…</p></section></main>;
-  return <main className="workspace"><header className="topbar"><button className="secondary compact" onClick={logout}>Log out</button><div><span className="eyebrow">CLIENTFLOW</span><h1>Your workspace</h1><p>{email}</p></div></header>
-    {error && <div className="alert error">{error}</div>}{notice && <div className="alert success">{notice}</div>}
-    <section className="stats"><div className="stat"><span>Clients</span><strong>{clients.length}</strong></div><div className="stat"><span>Active projects</span><strong>{activeProjects}</strong></div><div className="stat"><span>Completed</span><strong>{completedProjects}</strong></div></section>
-    <section className="grid two-col"><div className="panel"><div className="panel-heading"><div><span className="eyebrow">DIRECTORY</span><h2>Clients</h2></div></div>{clients.length === 0 ? <p className="muted">No clients yet. Add your first client below.</p> : <div className="records">{clients.map(client => <div className="record" key={client.id}><div><strong>{client.name}</strong><span>{client.company || client.email || 'No details added'}</span></div></div>)}</div>}<form className="inline-form" onSubmit={addClient}><input required placeholder="Client name" value={clientForm.name} onChange={event => setClientForm({ ...clientForm, name: event.target.value })} /><input type="email" placeholder="Email" value={clientForm.email} onChange={event => setClientForm({ ...clientForm, email: event.target.value })} /><input placeholder="Company" value={clientForm.company} onChange={event => setClientForm({ ...clientForm, company: event.target.value })} /><button disabled={savingClient}>{savingClient ? 'Adding…' : 'Add client'}</button></form></div>
-      <div className="panel"><div className="panel-heading"><div><span className="eyebrow">WORK</span><h2>Projects</h2></div></div>{projects.length === 0 ? <p className="muted">No projects yet. Add your first project below.</p> : <div className="records">{projects.map(project => <div className="record" key={project.id}><div><strong>{project.name}</strong><span>{project.clients?.[0]?.name || 'No client assigned'}{project.due_date ? ` · Due ${project.due_date}` : ''}</span></div><span className={`badge ${project.status}`}>{project.status}</span></div>)}</div>}<form className="stack-form" onSubmit={addProject}><input required placeholder="Project name" value={projectForm.name} onChange={event => setProjectForm({ ...projectForm, name: event.target.value })} /><div className="form-row"><select value={projectForm.client_id} onChange={event => setProjectForm({ ...projectForm, client_id: event.target.value })}><option value="">No client</option>{clients.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}</select><select value={projectForm.status} onChange={event => setProjectForm({ ...projectForm, status: event.target.value })}><option value="draft">Draft</option><option value="active">Active</option><option value="completed">Completed</option><option value="archived">Archived</option></select><input type="date" value={projectForm.due_date} onChange={event => setProjectForm({ ...projectForm, due_date: event.target.value })} /></div><button disabled={savingProject}>{savingProject ? 'Adding…' : 'Add project'}</button></form></div></section>
-  </main>;
+  return <main className="workspace"><header className="topbar"><button className="secondary compact" onClick={logout}>Log out</button><div><span className="eyebrow">CLIENTFLOW</span><h1>Your workspace</h1><p>{email}</p></div></header>{error && <div className="alert error">{error}</div>}{notice && <div className="alert success">{notice}</div>}<section className="stats"><div className="stat"><span>Clients</span><strong>{clients.length}</strong></div><div className="stat"><span>Active projects</span><strong>{activeProjects}</strong></div><div className="stat"><span>Completed</span><strong>{completedProjects}</strong></div></section><section className="grid two-col"><div className="panel"><div className="panel-heading"><div><span className="eyebrow">DIRECTORY</span><h2>Clients</h2></div></div>{clients.length === 0 ? <p className="muted">No clients yet. Add your first client below.</p> : <div className="records">{clients.map(client => <button className="record clickable" key={client.id} onClick={() => editClient(client)}><div><strong>{client.name}</strong><span>{client.company || client.email || 'Click to edit'}</span></div><span className="edit-hint">Edit</span></button>)}</div>}<form className="inline-form" onSubmit={saveClient}><input required placeholder="Client name" value={clientForm.name} onChange={e => setClientForm({ ...clientForm, name: e.target.value })} /><input type="email" placeholder="Email" value={clientForm.email} onChange={e => setClientForm({ ...clientForm, email: e.target.value })} /><input placeholder="Company" value={clientForm.company} onChange={e => setClientForm({ ...clientForm, company: e.target.value })} /><button disabled={saving}>{saving ? 'Saving…' : editingClientId ? 'Save client' : 'Add client'}</button>{editingClientId && <><button type="button" className="secondary" onClick={cancelEdit}>Cancel</button><button type="button" className="danger" onClick={removeClient}>Delete client</button></>}</form></div><div className="panel"><div className="panel-heading"><div><span className="eyebrow">WORK</span><h2>Projects</h2></div></div>{projects.length === 0 ? <p className="muted">No projects yet. Add your first project below.</p> : <div className="records">{projects.map(project => <button className="record clickable" key={project.id} onClick={() => editProject(project)}><div><strong>{project.name}</strong><span>{project.clients?.[0]?.name || 'No client'} · {project.start_date || 'No start'} → {project.end_date || 'No end'}</span></div><span className={`badge ${project.status}`}>{project.status}</span></button>)}</div>}<form className="stack-form" onSubmit={saveProject}><input required placeholder="Project name" value={projectForm.name} onChange={e => setProjectForm({ ...projectForm, name: e.target.value })} /><div className="form-row"><select value={projectForm.client_id} onChange={e => setProjectForm({ ...projectForm, client_id: e.target.value })}><option value="">No client</option>{clients.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}</select><select value={projectForm.status} onChange={e => setProjectForm({ ...projectForm, status: e.target.value })}><option value="draft">Draft</option><option value="active">Active</option><option value="completed">Completed</option><option value="archived">Archived</option></select></div><div className="form-row"><label>Start date<input type="date" value={projectForm.start_date} onChange={e => setProjectForm({ ...projectForm, start_date: e.target.value })} /></label><label>End date<input type="date" value={projectForm.end_date} onChange={e => setProjectForm({ ...projectForm, end_date: e.target.value })} /></label></div><button disabled={saving}>{saving ? 'Saving…' : editingProjectId ? 'Save project' : 'Add project'}</button>{editingProjectId && <><button type="button" className="secondary" onClick={cancelEdit}>Cancel</button><button type="button" className="danger" onClick={removeProject}>Delete project</button></>}</form></div></section></main>;
 }
